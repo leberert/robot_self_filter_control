@@ -1,0 +1,28 @@
+# Build directories
+build/
+install/
+log/
+devel/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled Object files
+*.o
+*.lo
+*.so
+*.so.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary files
+*.tmp
+*~
