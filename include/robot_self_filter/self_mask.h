@@ -31,6 +31,14 @@ enum
   SHADOW  = 2,
 };
 
+// Scale type for updating parameters
+enum class ScaleType
+{
+  SPHERE,
+  BOX,
+  CYLINDER
+};
+
 // Extended LinkInfo to allow multi-dimensional scale/padding
 struct LinkInfo
 {
@@ -340,6 +348,100 @@ public:
   const std::vector<SeeLink>& getBodies() const
   {
     return bodies_;
+  }
+
+  void updateLinkScale(const std::string &link_name, const std::vector<double> &scale_values, ScaleType type)
+  {
+    for (auto &sl : bodies_)
+    {
+      if (sl.name == link_name && sl.body)
+      {
+        switch (type)
+        {
+          case ScaleType::SPHERE:
+          {
+            auto sph = dynamic_cast<bodies::Sphere*>(sl.body);
+            if (sph && scale_values.size() >= 1)
+            {
+              sph->setScale(scale_values[0]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated sphere scale for %s", link_name.c_str());
+            }
+            break;
+          }
+          case ScaleType::BOX:
+          {
+            auto bx = dynamic_cast<bodies::Box*>(sl.body);
+            if (bx && scale_values.size() == 3)
+            {
+              bx->setScale(scale_values[0], scale_values[1], scale_values[2]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated box scale for %s", link_name.c_str());
+            }
+            break;
+          }
+          case ScaleType::CYLINDER:
+          {
+            auto cyl = dynamic_cast<bodies::Cylinder*>(sl.body);
+            if (cyl && scale_values.size() == 2)
+            {
+              cyl->setScale(scale_values[0], scale_values[1]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated cylinder scale for %s", link_name.c_str());
+            }
+            break;
+          }
+        }
+        // Recompute volume after scale change
+        sl.volume = sl.body->computeVolume();
+      }
+    }
+    // Re-sort by volume after updates
+    std::sort(bodies_.begin(), bodies_.end(), SortBodies());
+  }
+
+  void updateLinkPadding(const std::string &link_name, const std::vector<double> &padding_values, ScaleType type)
+  {
+    for (auto &sl : bodies_)
+    {
+      if (sl.name == link_name && sl.body)
+      {
+        switch (type)
+        {
+          case ScaleType::SPHERE:
+          {
+            auto sph = dynamic_cast<bodies::Sphere*>(sl.body);
+            if (sph && padding_values.size() >= 1)
+            {
+              sph->setPadding(padding_values[0]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated sphere padding for %s", link_name.c_str());
+            }
+            break;
+          }
+          case ScaleType::BOX:
+          {
+            auto bx = dynamic_cast<bodies::Box*>(sl.body);
+            if (bx && padding_values.size() == 3)
+            {
+              bx->setPadding(padding_values[0], padding_values[1], padding_values[2]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated box padding for %s", link_name.c_str());
+            }
+            break;
+          }
+          case ScaleType::CYLINDER:
+          {
+            auto cyl = dynamic_cast<bodies::Cylinder*>(sl.body);
+            if (cyl && padding_values.size() == 2)
+            {
+              cyl->setPadding(padding_values[0], padding_values[1]);
+              RCLCPP_DEBUG(node_->get_logger(), "Updated cylinder padding for %s", link_name.c_str());
+            }
+            break;
+          }
+        }
+        // Recompute volume after padding change
+        sl.volume = sl.body->computeVolume();
+      }
+    }
+    // Re-sort by volume after updates
+    std::sort(bodies_.begin(), bodies_.end(), SortBodies());
   }
 
 protected:

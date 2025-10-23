@@ -195,6 +195,81 @@ self_filter_mobile_robot:
 
 See `params/example.yaml` for a complete configuration example for construction equipment with multiple moving parts.
 
+## Runtime Parameter Changes
+
+The package supports **dynamic parameter reconfiguration** at runtime, allowing you to adjust filtering parameters without restarting the node. This is especially useful for tuning scale and padding values for different robot links.
+
+### Changing Parameters at Runtime
+
+Use the `ros2 param set` command to update parameters while the node is running:
+
+```bash
+# Update scale for a specific link (for sphere/cylinder)
+ros2 param set /self_filter self_see_links.BOOM.scale 1.2
+
+# Update padding for a specific link
+ros2 param set /self_filter self_see_links.BOOM.padding 0.15
+
+# Update box scale (3 values: x, y, z)
+ros2 param set /self_filter self_see_links.STICK.box_scale "[1.1, 1.1, 1.7]"
+
+# Update box padding (3 values: x, y, z)
+ros2 param set /self_filter self_see_links.STICK.box_padding "[0.05, 0.22, 0.05]"
+
+# Update cylinder scale (2 values: radial, vertical)
+ros2 param set /self_filter self_see_links.LF_WHEEL.cylinder_scale "[1.0, 1.0]"
+
+# Update cylinder padding (2 values: radial, vertical)
+ros2 param set /self_filter self_see_links.LF_WHEEL.cylinder_padding "[0.05, 0.3]"
+
+# Update default values
+ros2 param set /self_filter default_sphere_scale 1.1
+ros2 param set /self_filter default_sphere_padding 0.02
+ros2 param set /self_filter default_box_scale "[1.0, 1.0, 1.0]"
+ros2 param set /self_filter default_box_padding "[0.01, 0.01, 0.01]"
+
+# Update filtering behavior parameters
+ros2 param set /self_filter min_sensor_dist 2.5
+ros2 param set /self_filter keep_organized false
+ros2 param set /self_filter zero_for_removed_points false
+```
+
+### List Current Parameters
+
+View all current parameter values:
+
+```bash
+ros2 param list /self_filter
+ros2 param get /self_filter self_see_links.BOOM.scale
+```
+
+### Parameter Types by Shape
+
+- **Sphere**: `scale` (single value), `padding` (single value)
+- **Box**: `box_scale` (3 values: x,y,z), `box_padding` (3 values: x,y,z)
+- **Cylinder**: `cylinder_scale` (2 values: radial, vertical), `cylinder_padding` (2 values: radial, vertical)
+
+### Runtime Tuning Workflow
+
+1. **Start the node** with initial parameter values from YAML
+2. **Visualize collision shapes** in RViz using `/collision_shapes` topic
+3. **Identify problematic links** that need adjustment
+4. **Update parameters dynamically** using `ros2 param set`
+5. **Observe changes** in real-time in RViz and filtered point cloud
+6. **Save working values** back to YAML file for future use
+
+### Example: Tuning a Robotic Arm
+
+```bash
+# If arm links are filtering too aggressively
+ros2 param set /self_filter self_see_links.arm_link_1.box_scale "[0.9, 0.9, 0.9]"
+ros2 param set /self_filter self_see_links.arm_link_1.box_padding "[0.01, 0.01, 0.01]"
+
+# If base is not filtering enough
+ros2 param set /self_filter self_see_links.base_link.scale 1.2
+ros2 param set /self_filter self_see_links.base_link.padding 0.10
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -202,11 +277,11 @@ See `params/example.yaml` for a complete configuration example for construction 
 1. **Points not being filtered**
    - Check sensor frame matches configuration
    - Verify TF tree is complete
-   - Increase padding values
+   - Increase padding values (try runtime adjustment first)
    - Check URDF collision geometries
 
 2. **Too many points filtered**
-   - Reduce padding values
+   - Reduce padding values using runtime parameter changes
    - Check scale factors (should typically be 1.0)
    - Verify min_sensor_dist setting
 
@@ -219,6 +294,11 @@ See `params/example.yaml` for a complete configuration example for construction 
    - Verify input topic is publishing
    - Check remappings in launch file
    - Ensure robot_description is loaded
+
+5. **Runtime parameter changes not working**
+   - Verify the link name matches exactly (case-sensitive)
+   - Check parameter type matches shape type (box, cylinder, sphere)
+   - Use `ros2 param list` to see available parameters
 
 ## Contributing
 

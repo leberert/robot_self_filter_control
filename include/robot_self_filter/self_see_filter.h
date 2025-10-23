@@ -119,9 +119,14 @@ public:
       li.scale   = link_scl;
 
       links.push_back(li);
+      link_names_.push_back(lname);
     }
 
     sm_ = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, links);
+
+    // Setup parameter callback for runtime changes
+    param_callback_handle_ = node_->add_on_set_parameters_callback(
+      std::bind(&SelfFilter::parametersCallback, this, std::placeholders::_1));
   }
 
   ~SelfFilter() override = default;
@@ -163,6 +168,131 @@ public:
   }
 
 protected:
+  rcl_interfaces::msg::SetParametersResult parametersCallback(
+    const std::vector<rclcpp::Parameter> &parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+
+    for (const auto &param : parameters)
+    {
+      std::string param_name = param.get_name();
+
+      // Handle default parameters
+      if (param_name == "min_sensor_dist")
+      {
+        min_sensor_dist_ = param.as_double();
+        RCLCPP_INFO(node_->get_logger(), "Updated min_sensor_dist to: %f", min_sensor_dist_);
+      }
+      else if (param_name == "keep_organized")
+      {
+        keep_organized_ = param.as_bool();
+      }
+      else if (param_name == "zero_for_removed_points")
+      {
+        zero_for_removed_points_ = param.as_bool();
+      }
+      else if (param_name == "invert")
+      {
+        invert_ = param.as_bool();
+      }
+      else if (param_name == "default_sphere_scale")
+      {
+        default_sphere_scale_ = param.as_double();
+      }
+      else if (param_name == "default_sphere_padding")
+      {
+        default_sphere_pad_ = param.as_double();
+      }
+      else if (param_name == "default_box_scale")
+      {
+        default_box_scale_ = param.as_double_array();
+      }
+      else if (param_name == "default_box_padding")
+      {
+        default_box_pad_ = param.as_double_array();
+      }
+      else if (param_name == "default_cylinder_scale")
+      {
+        default_cyl_scale_ = param.as_double_array();
+      }
+      else if (param_name == "default_cylinder_padding")
+      {
+        default_cyl_pad_ = param.as_double_array();
+      }
+      // Handle per-link parameters
+      else if (param_name.find("self_see_links.") == 0)
+      {
+        // Extract link name from parameter name
+        // Format: self_see_links.<link_name>.<parameter_type>
+        size_t first_dot = param_name.find('.', 15); // after "self_see_links."
+        if (first_dot != std::string::npos)
+        {
+          std::string link_name = param_name.substr(15, first_dot - 15);
+          std::string param_type = param_name.substr(first_dot + 1);
+
+          // Check if this is a known link
+          if (std::find(link_names_.begin(), link_names_.end(), link_name) != link_names_.end())
+          {
+            if (param_type == "box_scale")
+            {
+              auto values = param.as_double_array();
+              if (values.size() == 3)
+              {
+                sm_->updateLinkScale(link_name, values, robot_self_filter::ScaleType::BOX);
+                RCLCPP_INFO(node_->get_logger(), "Updated %s box_scale to: [%f, %f, %f]",
+                           link_name.c_str(), values[0], values[1], values[2]);
+              }
+            }
+            else if (param_type == "box_padding")
+            {
+              auto values = param.as_double_array();
+              if (values.size() == 3)
+              {
+                sm_->updateLinkPadding(link_name, values, robot_self_filter::ScaleType::BOX);
+                RCLCPP_INFO(node_->get_logger(), "Updated %s box_padding to: [%f, %f, %f]",
+                           link_name.c_str(), values[0], values[1], values[2]);
+              }
+            }
+            else if (param_type == "cylinder_scale")
+            {
+              auto values = param.as_double_array();
+              if (values.size() == 2)
+              {
+                sm_->updateLinkScale(link_name, values, robot_self_filter::ScaleType::CYLINDER);
+                RCLCPP_INFO(node_->get_logger(), "Updated %s cylinder_scale to: [%f, %f]",
+                           link_name.c_str(), values[0], values[1]);
+              }
+            }
+            else if (param_type == "cylinder_padding")
+            {
+              auto values = param.as_double_array();
+              if (values.size() == 2)
+              {
+                sm_->updateLinkPadding(link_name, values, robot_self_filter::ScaleType::CYLINDER);
+                RCLCPP_INFO(node_->get_logger(), "Updated %s cylinder_padding to: [%f, %f]",
+                           link_name.c_str(), values[0], values[1]);
+              }
+            }
+            else if (param_type == "scale")
+            {
+              double value = param.as_double();
+              sm_->updateLinkScale(link_name, {value}, robot_self_filter::ScaleType::SPHERE);
+              RCLCPP_INFO(node_->get_logger(), "Updated %s scale to: %f", link_name.c_str(), value);
+            }
+            else if (param_type == "padding")
+            {
+              double value = param.as_double();
+              sm_->updateLinkPadding(link_name, {value}, robot_self_filter::ScaleType::SPHERE);
+              RCLCPP_INFO(node_->get_logger(), "Updated %s padding to: %f", link_name.c_str(), value);
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
   bool update(const PointCloud &data_in, PointCloud &data_out) override
   {
     std::vector<int> keep(data_in.points.size(), 0);
@@ -241,6 +371,8 @@ protected:
   double default_sphere_pad_ = 0.01;
 
   std::string sensor_frame_;
+  std::vector<std::string> link_names_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 };
 
 }  // namespace filters
