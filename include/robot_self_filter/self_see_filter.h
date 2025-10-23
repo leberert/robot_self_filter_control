@@ -2,10 +2,15 @@
 #ifndef FILTERS_SELF_SEE_H_
 #define FILTERS_SELF_SEE_H_
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <algorithm>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -15,6 +20,7 @@
 #include <filters/filter_base.hpp>
 #include <robot_self_filter/self_mask.h>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>  // For explicit constructor
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 
 namespace filters
 {
@@ -38,90 +44,53 @@ class SelfFilter : public FilterBase<pcl::PointCloud<PointT>>, public SelfFilter
 {
 public:
   using PointCloud = pcl::PointCloud<PointT>;
+  using ParameterMap = std::unordered_map<std::string, rclcpp::Parameter>;
 
   explicit SelfFilter(const rclcpp::Node::SharedPtr &node)
     : node_(node)
     , tf_buffer_(std::make_shared<tf2_ros::Buffer>(node_->get_clock()))
     , tf_listener_(std::make_shared<tf2_ros::TransformListener>(*tf_buffer_))
   {
-    node_->declare_parameter<double>("min_sensor_dist", 0.01, rcl_interfaces::msg::ParameterDescriptor());
-    node_->declare_parameter<bool>("keep_organized", false, rcl_interfaces::msg::ParameterDescriptor());
-    node_->declare_parameter<bool>("zero_for_removed_points", false, rcl_interfaces::msg::ParameterDescriptor());
-    node_->declare_parameter<bool>("invert", false, rcl_interfaces::msg::ParameterDescriptor());
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+
+    node_->declare_parameter<double>("min_sensor_dist", 0.01, descriptor);
+    node_->declare_parameter<bool>("keep_organized", false, descriptor);
+    node_->declare_parameter<bool>("zero_for_removed_points", false, descriptor);
+    node_->declare_parameter<bool>("invert", false, descriptor);
 
     node_->declare_parameter<std::vector<double>>("default_box_scale",
-      {1.0, 1.0, 1.0}, rcl_interfaces::msg::ParameterDescriptor());
+      {1.0, 1.0, 1.0}, descriptor);
     node_->declare_parameter<std::vector<double>>("default_box_padding",
-      {0.01, 0.01, 0.01}, rcl_interfaces::msg::ParameterDescriptor());
+      {0.01, 0.01, 0.01}, descriptor);
     node_->declare_parameter<std::vector<double>>("default_cylinder_scale",
-      {1.0, 1.0}, rcl_interfaces::msg::ParameterDescriptor());
+      {1.0, 1.0}, descriptor);
     node_->declare_parameter<std::vector<double>>("default_cylinder_padding",
-      {0.01, 0.01}, rcl_interfaces::msg::ParameterDescriptor());
-    node_->declare_parameter<double>("default_sphere_scale", 1.0, rcl_interfaces::msg::ParameterDescriptor());
-    node_->declare_parameter<double>("default_sphere_padding", 0.01, rcl_interfaces::msg::ParameterDescriptor());
+      {0.01, 0.01}, descriptor);
+    node_->declare_parameter<double>("default_sphere_scale", 1.0, descriptor);
+    node_->declare_parameter<double>("default_sphere_padding", 0.01, descriptor);
 
     node_->get_parameter("min_sensor_dist", min_sensor_dist_);
     node_->get_parameter("keep_organized", keep_organized_);
     node_->get_parameter("zero_for_removed_points", zero_for_removed_points_);
     node_->get_parameter("invert", invert_);
 
-    node_->get_parameter("default_box_scale", default_box_scale_);
-    node_->get_parameter("default_box_padding", default_box_pad_);
-    node_->get_parameter("default_cylinder_scale", default_cyl_scale_);
-    node_->get_parameter("default_cylinder_padding", default_cyl_pad_);
-    node_->get_parameter("default_sphere_scale", default_sphere_scale_);
-    node_->get_parameter("default_sphere_padding", default_sphere_pad_);
-
     node_->declare_parameter<std::vector<std::string>>(
       "self_see_links.names",
       std::vector<std::string>(),
-      rcl_interfaces::msg::ParameterDescriptor()
+      descriptor
     );
-    std::vector<std::string> link_names;
-    node_->get_parameter("self_see_links.names", link_names);
+    node_->get_parameter("self_see_links.names", link_names_);
 
-    std::vector<robot_self_filter::LinkInfo> links;
-    for (auto &lname : link_names)
+  refreshDefaultParameters();
+
+  auto links = loadLinkInfos(link_names_);
     {
-      robot_self_filter::LinkInfo li;
-      li.name = lname;
-      li.scale   = default_sphere_scale_;
-      li.padding = default_sphere_pad_;
-
-      std::string box_scale_key   = "self_see_links." + lname + ".box_scale";
-      std::string box_padding_key = "self_see_links." + lname + ".box_padding";
-      std::string cyl_scale_key   = "self_see_links." + lname + ".cylinder_scale";
-      std::string cyl_padding_key = "self_see_links." + lname + ".cylinder_padding";
-      std::string padding_key     = "self_see_links." + lname + ".padding";
-      std::string scale_key       = "self_see_links." + lname + ".scale";
-
-      node_->declare_parameter<std::vector<double>>(box_scale_key,
-        std::vector<double>(), rcl_interfaces::msg::ParameterDescriptor());
-      node_->declare_parameter<std::vector<double>>(box_padding_key,
-        std::vector<double>(), rcl_interfaces::msg::ParameterDescriptor());
-      node_->get_parameter(box_scale_key, li.box_scale);
-      node_->get_parameter(box_padding_key, li.box_padding);
-
-      node_->declare_parameter<std::vector<double>>(cyl_scale_key,
-        std::vector<double>(), rcl_interfaces::msg::ParameterDescriptor());
-      node_->declare_parameter<std::vector<double>>(cyl_padding_key,
-        std::vector<double>(), rcl_interfaces::msg::ParameterDescriptor());
-      node_->get_parameter(cyl_scale_key, li.cylinder_scale);
-      node_->get_parameter(cyl_padding_key, li.cylinder_padding);
-
-      node_->declare_parameter<double>(padding_key, default_sphere_pad_, rcl_interfaces::msg::ParameterDescriptor());
-      node_->declare_parameter<double>(scale_key, default_sphere_scale_, rcl_interfaces::msg::ParameterDescriptor());
-      double link_pad = default_sphere_pad_;
-      double link_scl = default_sphere_scale_;
-      node_->get_parameter(padding_key, link_pad);
-      node_->get_parameter(scale_key, link_scl);
-      li.padding = link_pad;
-      li.scale   = link_scl;
-
-      links.push_back(li);
+      std::lock_guard<std::mutex> lock(sm_mutex_);
+      sm_ = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, links);
     }
 
-    sm_ = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, links);
+    parameter_callback_handle_ = node_->add_on_set_parameters_callback(
+      std::bind(&SelfFilter::onParameterUpdate, this, std::placeholders::_1));
   }
 
   ~SelfFilter() override = default;
@@ -133,6 +102,7 @@ public:
 
   void getLinkNames(std::vector<std::string> &frames) override
   {
+    std::lock_guard<std::mutex> lock(sm_mutex_);
     if (sm_) sm_->getLinkNames(frames);
   }
 
@@ -159,12 +129,27 @@ public:
 
   robot_self_filter::SelfMask<PointT>* getSelfMaskPtr() const
   {
+    std::lock_guard<std::mutex> lock(sm_mutex_);
     return sm_.get();
+  }
+
+  template <typename Callable>
+  void withSelfMask(Callable &&callable)
+  {
+    std::lock_guard<std::mutex> lock(sm_mutex_);
+    callable(sm_.get());
   }
 
 protected:
   bool update(const PointCloud &data_in, PointCloud &data_out) override
   {
+    std::lock_guard<std::mutex> lock(sm_mutex_);
+    if (!sm_)
+    {
+      data_out = data_in;
+      return false;
+    }
+
     std::vector<int> keep(data_in.points.size(), 0);
     if (sensor_frame_.empty())
       sm_->maskContainment(data_in, keep);
@@ -223,10 +208,270 @@ protected:
     }
   }
 
+private:
+  void refreshDefaultParameters(const ParameterMap &overrides = ParameterMap())
+  {
+    default_box_scale_ = getVectorParameter("default_box_scale", overrides, default_box_scale_);
+    default_box_pad_   = getVectorParameter("default_box_padding", overrides, default_box_pad_);
+    default_cyl_scale_ = getVectorParameter("default_cylinder_scale", overrides, default_cyl_scale_);
+    default_cyl_pad_   = getVectorParameter("default_cylinder_padding", overrides, default_cyl_pad_);
+    default_sphere_scale_ = getNumericParameter("default_sphere_scale", overrides, default_sphere_scale_);
+    default_sphere_pad_   = getNumericParameter("default_sphere_padding", overrides, default_sphere_pad_);
+  }
+
+  robot_self_filter::LinkInfo loadLinkInfo(const std::string &lname,
+                                           const ParameterMap &overrides = ParameterMap())
+  {
+    robot_self_filter::LinkInfo li;
+    li.name   = lname;
+    li.scale  = default_sphere_scale_;
+    li.padding = default_sphere_pad_;
+
+    const std::string prefix = "self_see_links." + lname + ".";
+
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+
+    const std::string box_scale_key   = prefix + "box_scale";
+    const std::string box_padding_key = prefix + "box_padding";
+    const std::string cyl_scale_key   = prefix + "cylinder_scale";
+    const std::string cyl_padding_key = prefix + "cylinder_padding";
+    const std::string padding_key     = prefix + "padding";
+    const std::string scale_key       = prefix + "scale";
+
+    if (!node_->has_parameter(box_scale_key))
+    {
+      node_->declare_parameter<std::vector<double>>(box_scale_key, std::vector<double>(), descriptor);
+    }
+    if (!node_->has_parameter(box_padding_key))
+    {
+      node_->declare_parameter<std::vector<double>>(box_padding_key, std::vector<double>(), descriptor);
+    }
+    li.box_scale   = getVectorParameter(box_scale_key, overrides, li.box_scale);
+    li.box_padding = getVectorParameter(box_padding_key, overrides, li.box_padding);
+
+    if (!node_->has_parameter(cyl_scale_key))
+    {
+      node_->declare_parameter<std::vector<double>>(cyl_scale_key, std::vector<double>(), descriptor);
+    }
+    if (!node_->has_parameter(cyl_padding_key))
+    {
+      node_->declare_parameter<std::vector<double>>(cyl_padding_key, std::vector<double>(), descriptor);
+    }
+    li.cylinder_scale   = getVectorParameter(cyl_scale_key, overrides, li.cylinder_scale);
+    li.cylinder_padding = getVectorParameter(cyl_padding_key, overrides, li.cylinder_padding);
+
+    if (!node_->has_parameter(padding_key))
+    {
+      node_->declare_parameter<double>(padding_key, default_sphere_pad_, descriptor);
+    }
+    li.padding = getNumericParameter(padding_key, overrides, li.padding);
+
+    if (!node_->has_parameter(scale_key))
+    {
+      node_->declare_parameter<double>(scale_key, default_sphere_scale_, descriptor);
+    }
+    li.scale = getNumericParameter(scale_key, overrides, li.scale);
+
+    return li;
+  }
+
+  std::vector<robot_self_filter::LinkInfo> loadLinkInfos(const std::vector<std::string> &names,
+                                                        const ParameterMap &overrides = ParameterMap())
+  {
+    std::vector<robot_self_filter::LinkInfo> links;
+    links.reserve(names.size());
+    for (const auto &name : names)
+    {
+      links.push_back(loadLinkInfo(name, overrides));
+    }
+    return links;
+  }
+
+  std::vector<double> getVectorParameter(const std::string &name,
+                                         const ParameterMap &overrides,
+                                         const std::vector<double> &fallback)
+  {
+    auto it = overrides.find(name);
+    if (it != overrides.end())
+    {
+      switch (it->second.get_type())
+      {
+        case rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY:
+          return it->second.as_double_array();
+        case rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY:
+        {
+          const auto &ints = it->second.as_integer_array();
+          return std::vector<double>(ints.begin(), ints.end());
+        }
+        default:
+          RCLCPP_WARN(node_->get_logger(),
+                      "Unexpected parameter type for '%s'; keeping previous value", name.c_str());
+          return fallback;
+      }
+    }
+
+    std::vector<double> value = fallback;
+    node_->get_parameter(name, value);
+    return value;
+  }
+
+  double getNumericParameter(const std::string &name,
+                             const ParameterMap &overrides,
+                             double fallback)
+  {
+    auto it = overrides.find(name);
+    if (it != overrides.end())
+    {
+      switch (it->second.get_type())
+      {
+        case rclcpp::ParameterType::PARAMETER_DOUBLE:
+          return it->second.as_double();
+        case rclcpp::ParameterType::PARAMETER_INTEGER:
+          return static_cast<double>(it->second.as_int());
+        default:
+          RCLCPP_WARN(node_->get_logger(),
+                      "Unexpected parameter type for '%s'; keeping previous value", name.c_str());
+          return fallback;
+      }
+    }
+
+    double value = fallback;
+    node_->get_parameter(name, value);
+    return value;
+  }
+
+  std::vector<std::string> getStringArrayParameter(const std::string &name,
+                                                   const ParameterMap &overrides,
+                                                   const std::vector<std::string> &fallback)
+  {
+    auto it = overrides.find(name);
+    if (it != overrides.end())
+    {
+      if (it->second.get_type() == rclcpp::ParameterType::PARAMETER_STRING_ARRAY)
+      {
+        return it->second.as_string_array();
+      }
+
+      RCLCPP_WARN(node_->get_logger(),
+                  "Unexpected parameter type for '%s'; keeping previous value", name.c_str());
+      return fallback;
+    }
+
+    std::vector<std::string> value = fallback;
+    node_->get_parameter(name, value);
+    return value;
+  }
+
+  bool isManagedLink(const std::string &name) const
+  {
+    return std::find(link_names_.begin(), link_names_.end(), name) != link_names_.end();
+  }
+
+  rcl_interfaces::msg::SetParametersResult onParameterUpdate(const std::vector<rclcpp::Parameter> &params)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "success";
+
+    bool relevant = false;
+    bool defaults_changed = false;
+    bool names_changed = false;
+    std::unordered_set<std::string> affected_links;
+
+    ParameterMap overrides;
+    overrides.reserve(params.size());
+
+    for (const auto &param : params)
+    {
+      overrides[param.get_name()] = param;
+      const std::string &name = param.get_name();
+      if (name == "self_see_links.names")
+      {
+        names_changed = true;
+        relevant = true;
+        continue;
+      }
+      if (name.rfind("self_see_links.", 0) == 0)
+      {
+        relevant = true;
+        auto remainder = name.substr(std::string("self_see_links.").length());
+        auto dot_pos = remainder.find('.');
+        if (dot_pos != std::string::npos)
+        {
+          affected_links.insert(remainder.substr(0, dot_pos));
+        }
+        continue;
+      }
+      if (name.rfind("default_", 0) == 0)
+      {
+        defaults_changed = true;
+        relevant = true;
+      }
+    }
+
+    if (!relevant)
+    {
+      return result;
+    }
+
+    refreshDefaultParameters(overrides);
+
+    if (names_changed)
+    {
+      std::vector<std::string> updated_names =
+        getStringArrayParameter("self_see_links.names", overrides, link_names_);
+
+      auto new_links = loadLinkInfos(updated_names, overrides);
+      auto new_mask = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, new_links);
+      {
+        std::lock_guard<std::mutex> lock(sm_mutex_);
+        sm_ = new_mask;
+        link_names_ = std::move(updated_names);
+      }
+      return result;
+    }
+
+    if (defaults_changed && affected_links.empty())
+    {
+      affected_links.insert(link_names_.begin(), link_names_.end());
+    }
+
+    if (affected_links.empty())
+    {
+      return result;
+    }
+
+    std::vector<robot_self_filter::LinkInfo> updates;
+    updates.reserve(affected_links.size());
+    for (const auto &name : affected_links)
+    {
+      if (!isManagedLink(name))
+      {
+        RCLCPP_WARN(node_->get_logger(), "Ignoring parameter update for unmanaged link '%s'", name.c_str());
+        continue;
+      }
+      updates.push_back(loadLinkInfo(name, overrides));
+    }
+
+    if (!updates.empty())
+    {
+      std::lock_guard<std::mutex> lock(sm_mutex_);
+      if (sm_)
+      {
+        sm_->updateLinkParameters(updates);
+      }
+    }
+
+    return result;
+  }
+
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::shared_ptr<robot_self_filter::SelfMask<PointT>> sm_;
+  mutable std::mutex sm_mutex_;
+  std::vector<std::string> link_names_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
   bool keep_organized_ = false;
   bool zero_for_removed_points_ = false;

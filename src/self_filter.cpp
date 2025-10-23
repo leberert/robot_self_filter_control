@@ -144,8 +144,10 @@ namespace robot_self_filter
         auto sf_xyz = std::dynamic_pointer_cast<filters::SelfFilter<pcl::PointXYZ>>(self_filter_);
         if (!sf_xyz)
           return;
-        auto mask = sf_xyz->getSelfMaskPtr();
-        publishShapesFromMask(mask, cloud->header.frame_id);
+        sf_xyz->withSelfMask([this, &cloud](robot_self_filter::SelfMask<pcl::PointXYZ> *mask)
+        {
+          publishShapesFromMask(mask, cloud->header.frame_id);
+        });
         break;
       }
       case SensorType::OusterSensor:
@@ -153,8 +155,10 @@ namespace robot_self_filter
         auto sf_ouster = std::dynamic_pointer_cast<filters::SelfFilter<PointOuster>>(self_filter_);
         if (!sf_ouster)
           return;
-        auto mask = sf_ouster->getSelfMaskPtr();
-        publishShapesFromMask(mask, cloud->header.frame_id);
+        sf_ouster->withSelfMask([this, &cloud](robot_self_filter::SelfMask<PointOuster> *mask)
+        {
+          publishShapesFromMask(mask, cloud->header.frame_id);
+        });
         break;
       }
       default:

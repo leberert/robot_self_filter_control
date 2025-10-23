@@ -126,6 +126,17 @@ The filter automatically determines shape types from the robot's URDF collision 
 4. **Consider sensor noise**: Increase padding for noisy sensors
 5. **Monitor performance**: Larger padding values may filter valid points
 
+### Runtime adjustments
+
+`robot_self_filter` now listens for parameter updates at runtime. You can tweak scale and padding values without restarting the node:
+
+```bash
+ros2 param set /self_filter "self_see_links.grip_object.cylinder_scale" "[1.5, 1.0]"
+ros2 param set /self_filter "self_see_links.grip_object.padding" 0.02
+```
+
+When a parameter in the `self_see_links.<link>` namespace changes, the node reapplies the updated values to the active collision bodies. Updates to the default scale/padding parameters are also propagated to every managed link. If you change the list of link names at runtime the filter will rebuild its mask in-place, reusing the current URDF.
+
 ## Topics
 
 ### Subscribed Topics

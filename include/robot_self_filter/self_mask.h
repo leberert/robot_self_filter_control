@@ -126,6 +126,7 @@ protected:
     bodies::Body    *unscaledBody;
     tf2::Transform   constTransf;
     double           volume;
+    LinkInfo         link_info;
   };
 
   struct SortBodies
@@ -342,6 +343,121 @@ public:
     return bodies_;
   }
 
+  bool updateLinkParameters(const std::vector<LinkInfo> &links)
+  {
+    bool updated = false;
+
+    for (const auto &linfo : links)
+    {
+      for (auto &sl : bodies_)
+      {
+        if (sl.name != linfo.name)
+        {
+          continue;
+        }
+
+        sl.link_info = linfo;
+
+        switch (sl.body->getType())
+        {
+          case shapes::SPHERE:
+          {
+            auto sphere_body = dynamic_cast<bodies::Sphere *>(sl.body);
+            if (sphere_body)
+            {
+              sphere_body->setScale(linfo.scale);
+              sphere_body->setPadding(linfo.padding);
+              updated = true;
+            }
+            break;
+          }
+          case shapes::BOX:
+          {
+            auto box_body = dynamic_cast<bodies::Box *>(sl.body);
+            if (box_body)
+            {
+              if (linfo.box_scale.size() == 3)
+              {
+                box_body->setScale(linfo.box_scale[0], linfo.box_scale[1], linfo.box_scale[2]);
+              }
+              else
+              {
+                box_body->setScale(linfo.scale, linfo.scale, linfo.scale);
+              }
+
+              if (linfo.box_padding.size() == 3)
+              {
+                box_body->setPadding(linfo.box_padding[0], linfo.box_padding[1], linfo.box_padding[2]);
+              }
+              else
+              {
+                box_body->setPadding(linfo.padding, linfo.padding, linfo.padding);
+              }
+              updated = true;
+            }
+            break;
+          }
+          case shapes::CYLINDER:
+          {
+            auto cylinder_body = dynamic_cast<bodies::Cylinder *>(sl.body);
+            if (cylinder_body)
+            {
+              if (linfo.cylinder_scale.size() == 2)
+              {
+                cylinder_body->setScale(linfo.cylinder_scale[0], linfo.cylinder_scale[1]);
+              }
+              else
+              {
+                cylinder_body->setScale(linfo.scale, linfo.scale);
+              }
+
+              if (linfo.cylinder_padding.size() == 2)
+              {
+                cylinder_body->setPadding(linfo.cylinder_padding[0], linfo.cylinder_padding[1]);
+              }
+              else
+              {
+                cylinder_body->setPadding(linfo.padding, linfo.padding);
+              }
+              updated = true;
+            }
+            break;
+          }
+          case shapes::MESH:
+          {
+            // Mesh bodies currently use uniform scale defined at construction; no runtime update.
+            break;
+          }
+          default:
+            break;
+        }
+
+        if (sl.body)
+        {
+          sl.volume = sl.body->computeVolume();
+        }
+      }
+    }
+
+    if (updated)
+    {
+      std::sort(bodies_.begin(), bodies_.end(), SortBodies());
+      computeBoundingSpheres();
+    }
+
+    return updated;
+  }
+
+  bool rebuild(const std::vector<LinkInfo> &links)
+  {
+    bool ok = configure(links);
+    if (ok)
+    {
+      computeBoundingSpheres();
+    }
+    return ok;
+  }
+
 protected:
   void freeMemory()
   {
@@ -384,13 +500,14 @@ protected:
 
       for (auto &coll : collisions)
       {
-        shapes::Shape *shape = constructShape(coll->geometry.get());
-        if (!shape) continue;
+    shapes::Shape *shape = constructShape(coll->geometry.get());
+    if (!shape) continue;
 
-        SeeLink sl;
-        sl.name       = linfo.name;
-        sl.constTransf = urdfPose2TFTransform(coll->origin);
-        sl.body       = bodies::createBodyFromShape(shape);
+    SeeLink sl;
+    sl.name       = linfo.name;
+    sl.link_info  = linfo;
+    sl.constTransf = urdfPose2TFTransform(coll->origin);
+    sl.body       = bodies::createBodyFromShape(shape);
 
         if (sl.body)
         {
