@@ -258,6 +258,25 @@ ros2 param get /self_filter self_see_links.BOOM.scale
 5. **Observe changes** in real-time in RViz and filtered point cloud
 6. **Save working values** back to YAML file for future use
 
+### Interactive Helper Script
+
+An interactive helper script is provided for convenience:
+
+```bash
+# Run the interactive parameter adjustment script
+./scripts/runtime_param_example.sh
+
+# Or specify a different node name
+./scripts/runtime_param_example.sh /my_custom_filter_node
+```
+
+The script provides an interactive menu for:
+- Listing all parameters
+- Viewing link-specific parameters
+- Adjusting scale values
+- Adjusting padding values
+- Viewing usage examples
+
 ### Example: Tuning a Robotic Arm
 
 ```bash

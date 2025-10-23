@@ -194,6 +194,7 @@ install(
   DIRECTORY
     launch
     params
+    scripts
   DESTINATION share/${PROJECT_NAME}
 )
 
