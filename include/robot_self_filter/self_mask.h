@@ -143,9 +143,11 @@ public:
 
   SelfMask(rclcpp::Node::SharedPtr node,
            tf2_ros::Buffer &tf_buffer,
-           const std::vector<LinkInfo> &links)
+           const std::vector<LinkInfo> &links,
+           bool shadow_filter_enabled = true)
     : node_(node)
     , tf_buffer_(tf_buffer)
+    , shadow_filter_enabled_(shadow_filter_enabled)
   {
     configure(links);
   }
@@ -341,6 +343,16 @@ public:
   const std::vector<SeeLink>& getBodies() const
   {
     return bodies_;
+  }
+
+  void setShadowFilteringEnabled(bool enabled)
+  {
+    shadow_filter_enabled_ = enabled;
+  }
+
+  bool isShadowFilteringEnabled() const
+  {
+    return shadow_filter_enabled_;
   }
 
   bool updateLinkParameters(const std::vector<LinkInfo> &links)
@@ -677,7 +689,7 @@ protected:
           for (auto &sl : bodies_)
           {
             std::vector<tf2::Vector3> hits;
-            if (sl.body->intersectsRay(pt, dir, &hits, 1))
+            if (shadow_filter_enabled_ && sl.body->intersectsRay(pt, dir, &hits, 1))
             {
               tf2::Vector3 diff = sensor_pos_ - hits[0];
               if (dir.dot(diff) >= 0.0)
@@ -707,6 +719,8 @@ protected:
 
   rclcpp::Node::SharedPtr node_;
   tf2_ros::Buffer        &tf_buffer_;
+
+  bool shadow_filter_enabled_{true};
 
   tf2::Vector3             sensor_pos_{0, 0, 0};
   double                   min_sensor_dist_{0.01};

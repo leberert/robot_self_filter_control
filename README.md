@@ -64,6 +64,7 @@ ros2 launch robot_self_filter self_filter.launch.py \
 | `out_pointcloud_topic` | string | `/cloud_out` | Filtered point cloud topic |
 | `lidar_sensor_type` | int | `2` | Sensor type (0: XYZ, 1: XYZRGB, 2: Ouster, 3: Hesai, 4: Robosense, 5: Pandar) |
 | `zero_for_removed_points` | bool | `true` | Set filtered points to zero instead of removing |
+| `shadow_filter_enabled` | bool | `true` | When false, shadow points are kept instead of filtered |
 | `use_sim_time` | bool | `true` | Use simulation time |
 | `description_name` | string | `/robot_description` | Robot description parameter namespace |
 
@@ -133,6 +134,7 @@ The filter automatically determines shape types from the robot's URDF collision 
 ```bash
 ros2 param set /self_filter "self_see_links.grip_object.cylinder_scale" "[1.5, 1.0]"
 ros2 param set /self_filter "self_see_links.grip_object.padding" 0.02
+ros2 param set /self_filter shadow_filter_enabled false
 ```
 
 When a parameter in the `self_see_links.<link>` namespace changes, the node reapplies the updated values to the active collision bodies. Updates to the default scale/padding parameters are also propagated to every managed link. If you change the list of link names at runtime the filter will rebuild its mask in-place, reusing the current URDF.

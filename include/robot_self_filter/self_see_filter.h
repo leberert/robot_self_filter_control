@@ -57,6 +57,7 @@ public:
     node_->declare_parameter<bool>("keep_organized", false, descriptor);
     node_->declare_parameter<bool>("zero_for_removed_points", false, descriptor);
     node_->declare_parameter<bool>("invert", false, descriptor);
+    node_->declare_parameter<bool>("shadow_filter_enabled", true, descriptor);
 
     node_->declare_parameter<std::vector<double>>("default_box_scale",
       {1.0, 1.0, 1.0}, descriptor);
@@ -73,6 +74,7 @@ public:
     node_->get_parameter("keep_organized", keep_organized_);
     node_->get_parameter("zero_for_removed_points", zero_for_removed_points_);
     node_->get_parameter("invert", invert_);
+  node_->get_parameter("shadow_filter_enabled", shadow_filter_enabled_);
 
     node_->declare_parameter<std::vector<std::string>>(
       "self_see_links.names",
@@ -83,10 +85,10 @@ public:
 
   refreshDefaultParameters();
 
-  auto links = loadLinkInfos(link_names_);
+    auto links = loadLinkInfos(link_names_);
     {
       std::lock_guard<std::mutex> lock(sm_mutex_);
-      sm_ = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, links);
+      sm_ = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, links, shadow_filter_enabled_);
     }
 
     parameter_callback_handle_ = node_->add_on_set_parameters_callback(
@@ -340,6 +342,31 @@ private:
     return value;
   }
 
+  bool getBoolParameter(const std::string &name,
+                        const ParameterMap &overrides,
+                        bool fallback)
+  {
+    auto it = overrides.find(name);
+    if (it != overrides.end())
+    {
+      switch (it->second.get_type())
+      {
+        case rclcpp::ParameterType::PARAMETER_BOOL:
+          return it->second.as_bool();
+        case rclcpp::ParameterType::PARAMETER_INTEGER:
+          return it->second.as_int() != 0;
+        default:
+          RCLCPP_WARN(node_->get_logger(),
+                      "Unexpected parameter type for '%s'; keeping previous value", name.c_str());
+          return fallback;
+      }
+    }
+
+    bool value = fallback;
+    node_->get_parameter(name, value);
+    return value;
+  }
+
   std::vector<std::string> getStringArrayParameter(const std::string &name,
                                                    const ParameterMap &overrides,
                                                    const std::vector<std::string> &fallback)
@@ -373,9 +400,10 @@ private:
     result.successful = true;
     result.reason = "success";
 
-    bool relevant = false;
+  bool relevant = false;
     bool defaults_changed = false;
     bool names_changed = false;
+  bool shadow_flag_changed = false;
     std::unordered_set<std::string> affected_links;
 
     ParameterMap overrides;
@@ -388,6 +416,12 @@ private:
       if (name == "self_see_links.names")
       {
         names_changed = true;
+        relevant = true;
+        continue;
+      }
+      if (name == "shadow_filter_enabled")
+      {
+        shadow_flag_changed = true;
         relevant = true;
         continue;
       }
@@ -416,13 +450,25 @@ private:
 
     refreshDefaultParameters(overrides);
 
+    bool previous_shadow_enabled = shadow_filter_enabled_;
+    shadow_filter_enabled_ = getBoolParameter("shadow_filter_enabled", overrides, shadow_filter_enabled_);
+
+    if (shadow_flag_changed && previous_shadow_enabled != shadow_filter_enabled_)
+    {
+      std::lock_guard<std::mutex> lock(sm_mutex_);
+      if (sm_)
+      {
+        sm_->setShadowFilteringEnabled(shadow_filter_enabled_);
+      }
+    }
+
     if (names_changed)
     {
       std::vector<std::string> updated_names =
         getStringArrayParameter("self_see_links.names", overrides, link_names_);
 
-      auto new_links = loadLinkInfos(updated_names, overrides);
-      auto new_mask = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, new_links);
+  auto new_links = loadLinkInfos(updated_names, overrides);
+  auto new_mask = std::make_shared<robot_self_filter::SelfMask<PointT>>(node_, *tf_buffer_, new_links, shadow_filter_enabled_);
       {
         std::lock_guard<std::mutex> lock(sm_mutex_);
         sm_ = new_mask;
@@ -458,6 +504,7 @@ private:
       std::lock_guard<std::mutex> lock(sm_mutex_);
       if (sm_)
       {
+        sm_->setShadowFilteringEnabled(shadow_filter_enabled_);
         sm_->updateLinkParameters(updates);
       }
     }
@@ -476,6 +523,7 @@ private:
   bool keep_organized_ = false;
   bool zero_for_removed_points_ = false;
   bool invert_ = false;
+  bool shadow_filter_enabled_ = true;
   double min_sensor_dist_ = 0.01;
 
   std::vector<double> default_box_scale_;
